@@ -1,0 +1,12 @@
+syntax = "proto3";
+package goro;
+option go_package = "github.com/udisondev/sprut/pkg/message";
+
+// Message представляет сообщение между клиентами
+message Message {
+  string from = 1;          // hex-encoded sender pubkey
+  string to = 2;            // hex-encoded recipient pubkey
+  string id = 3;            // message ID from client
+  bytes payload = 4;        // raw payload
+  int64 unix_date_time = 5; // server timestamp
+}
