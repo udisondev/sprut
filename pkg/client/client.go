@@ -83,7 +83,6 @@ func Connect(addr string, send <-chan OutgoingMessage, opts ...ConnectOption) (<
 		keys:         keys,
 		localAddr:    DefaultLocalAddr,
 		dialTimeout:  DefaultDialTimeout,
-		readTimeout:  DefaultReadTimeout,
 		writeTimeout: DefaultWriteTimeout,
 		readBufSize:  DefaultReadBufSize,
 	}
@@ -110,7 +109,7 @@ func Connect(addr string, send <-chan OutgoingMessage, opts ...ConnectOption) (<
 	}
 
 	// 5. Проходим аутентификацию
-	if err := authenticate(conn, cfg.keys, cfg.readTimeout); err != nil {
+	if err := authenticate(conn, cfg.keys, cfg.dialTimeout); err != nil {
 		_ = conn.Close() // ошибка Close() не важна, возвращаем ошибку authenticate
 		return nil, fmt.Errorf("authenticate: %w", err)
 	}
@@ -233,19 +232,8 @@ func readLoop(conn *tls.Conn, cfg *connectConfig, recv chan<- *message.Message, 
 		default:
 		}
 
-		if cfg.readTimeout > 0 {
-			if err := conn.SetReadDeadline(time.Now().Add(cfg.readTimeout)); err != nil {
-				handleError(cfg, fmt.Errorf("set read deadline: %w", err))
-				return
-			}
-		}
-
 		serverMsg, err := protocol.DecodeServerMessage(reader)
 		if err != nil {
-			// Таймаут — продолжаем
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue
-			}
 			// EOF или closed — нормальное завершение
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return

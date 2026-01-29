@@ -135,7 +135,7 @@ func Default() *Config {
 			ChallengeTTL:    60 * time.Second,
 		},
 		Log: LogConfig{
-			Level:  "info",
+			Level:  "debug",
 			Format: "json",
 		},
 	}

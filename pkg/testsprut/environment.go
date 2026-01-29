@@ -226,7 +226,6 @@ func (e *Environment) NewClient(ctx context.Context, keys *identity.KeyPair) (*C
 		client.WithKeys(keys),
 		client.WithInsecureSkipVerify(),
 		client.WithDialTimeout(10*time.Second),
-		client.WithReadTimeout(30*time.Second),
 		client.WithWriteTimeout(10*time.Second),
 	)
 	if err != nil {

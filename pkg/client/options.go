@@ -12,7 +12,6 @@ import (
 // Константы по умолчанию.
 const (
 	DefaultDialTimeout  = 10 * time.Second
-	DefaultReadTimeout  = 30 * time.Second
 	DefaultWriteTimeout = 30 * time.Second
 	DefaultReadBufSize  = 100
 )
@@ -35,7 +34,6 @@ type connectConfig struct {
 	localAddr    *net.TCPAddr
 	onError      func(error)
 	dialTimeout  time.Duration
-	readTimeout  time.Duration
 	writeTimeout time.Duration
 
 	readBufSize int
@@ -80,12 +78,6 @@ func WithReadBufSize(n int) ConnectOption {
 	}
 }
 
-// WithReadTimeout устанавливает таймаут чтения.
-func WithReadTimeout(d time.Duration) ConnectOption {
-	return func(c *connectConfig) {
-		c.readTimeout = d
-	}
-}
 
 // WithWriteTimeout устанавливает таймаут записи.
 func WithWriteTimeout(d time.Duration) ConnectOption {
