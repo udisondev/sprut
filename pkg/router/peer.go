@@ -12,7 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"golang.org/x/time/rate"
 
-	"github.com/udisondev/sprut/internal/broker"
+	"github.com/udisondev/sprut/pkg/broker"
 	"github.com/udisondev/sprut/pkg/protocol"
 )
 
@@ -71,6 +71,8 @@ func newPeer(
 	}
 	peer.subscriber = subscriber
 
+	slog.Debug("peer: NATS subscription created", "client", pubKeyHex, "subject", "goro.msg."+pubKeyHex)
+
 	return peer, nil
 }
 
@@ -88,14 +90,15 @@ func (p *Peer) AllowMessage() bool {
 // Close закрывает соединение с пиром.
 func (p *Peer) Close() {
 	p.closeOnce.Do(func() {
+		slog.Debug("peer: closing", "client", p.pubKeyHex)
 		close(p.closeCh)
 		if p.subscriber != nil {
 			if err := p.subscriber.Unsubscribe(); err != nil {
-				slog.Error("unsubscribe", "error", err, "client", p.pubKeyHex)
+				slog.Error("peer: unsubscribe failed", "error", err, "client", p.pubKeyHex)
 			}
 		}
 		if err := p.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			slog.Error("close connection", "error", err, "client", p.pubKeyHex)
+			slog.Error("peer: close connection failed", "error", err, "client", p.pubKeyHex)
 		}
 	})
 }
@@ -108,10 +111,11 @@ func (p *Peer) writeLoop() {
 			return
 		case data := <-p.writeCh:
 			if err := p.writeMessage(data); err != nil {
-				slog.Error("write message", "error", err, "client", p.pubKeyHex)
+				slog.Error("peer: write message failed", "error", err, "client", p.pubKeyHex)
 				p.Close()
 				return
 			}
+			slog.Debug("peer: message sent", "client", p.pubKeyHex, "size", len(data))
 		}
 	}
 }
@@ -144,7 +148,7 @@ func (p *Peer) handleNATSMessage(msg *nats.Msg) {
 	case <-p.closeCh:
 		return
 	case p.writeCh <- msg.Data:
-		// OK - сообщение добавлено в очередь
+		slog.Debug("peer: message queued", "client", p.pubKeyHex, "queue_size", len(p.writeCh))
 	default:
 		// Буфер переполнен - клиент не успевает обрабатывать (slow consumer)
 		// Проверяем ещё раз closeCh для предотвращения race condition
@@ -152,7 +156,7 @@ func (p *Peer) handleNATSMessage(msg *nats.Msg) {
 		case <-p.closeCh:
 			return
 		default:
-			slog.Warn("write buffer full, disconnecting slow client", "client", p.pubKeyHex)
+			slog.Warn("peer: write buffer full, disconnecting slow client", "client", p.pubKeyHex)
 			p.Close()
 		}
 	}

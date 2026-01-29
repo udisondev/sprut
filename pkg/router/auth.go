@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,12 +40,14 @@ const (
 // При успехе pubKey остаётся в buf[offPubKey:offPubKey+32].
 // ServerID уже записан в buf[offServerID:offServerID+32] при инициализации семафора.
 func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte) error {
+	remote := conn.RemoteAddr().String()
+
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return fmt.Errorf("set deadline: %w", err)
 	}
 	defer func() {
 		if err := conn.SetDeadline(time.Time{}); err != nil {
-			slog.Error("reset deadline", "error", err)
+			slog.Error("auth: reset deadline failed", "error", err, "remote", remote)
 		}
 	}()
 
@@ -53,6 +56,7 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 		return fmt.Errorf("read hello type: %w", err)
 	}
 	if buf[offWork] != protocol.TypeClientHello {
+		slog.Warn("auth: unexpected message type", "remote", remote, "expected", protocol.TypeClientHello, "got", buf[offWork])
 		return fmt.Errorf("unexpected message type: %d", buf[offWork])
 	}
 
@@ -61,10 +65,14 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 		return fmt.Errorf("read pubkey: %w", err)
 	}
 
+	pubKeyPrefix := hex.EncodeToString(buf[offPubKey : offPubKey+8])
+	slog.Debug("auth: received client hello", "remote", remote, "pubkey_prefix", pubKeyPrefix)
+
 	// 3. Генерируем challenge прямо в буфер
 	if _, err := rand.Read(buf[offChallenge : offChallenge+protocol.ChallengeSize]); err != nil {
 		return fmt.Errorf("generate challenge: %w", err)
 	}
+	slog.Debug("auth: challenge generated", "remote", remote)
 
 	// 4. Записываем timestamp в буфер
 	timestamp := uint64(time.Now().Unix())
@@ -82,14 +90,17 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 	if _, err := conn.Write(challengeMsg); err != nil {
 		return fmt.Errorf("send challenge: %w", err)
 	}
+	slog.Debug("auth: challenge sent", "remote", remote)
 
 	// 7. Читаем TypeClientResponse (1 byte)
 	if _, err := io.ReadFull(conn, buf[offWork:offWork+1]); err != nil {
 		return fmt.Errorf("read response type: %w", err)
 	}
 	if buf[offWork] != protocol.TypeClientResponse {
+		slog.Warn("auth: unexpected message type", "remote", remote, "expected", protocol.TypeClientResponse, "got", buf[offWork])
 		return fmt.Errorf("unexpected message type: %d", buf[offWork])
 	}
+	slog.Debug("auth: received client response", "remote", remote)
 
 	// 8. Читаем Signature
 	if _, err := io.ReadFull(conn, buf[offSignature:offSignature+protocol.SignatureSize]); err != nil {
@@ -103,6 +114,7 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 	}
 	channelBinding, err := protocol.GetChannelBinding(tlsConn.ConnectionState())
 	if err != nil {
+		slog.Error("auth: channel binding failed", "remote", remote, "error", err)
 		return fmt.Errorf("get channel binding: %w", err)
 	}
 
@@ -117,19 +129,26 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 
 	signedData := protocol.BuildSignedDataTo(buf[offSignedData:offSignedData+protocol.SignedDataSize], challenge, timestamp, serverID, pubKey, channelBinding)
 
+	slog.Debug("auth: verifying signature", "remote", remote)
+
 	// 11. Верифицируем подпись
 	if !ed25519.Verify(buf[offPubKey:offPubKey+protocol.PublicKeySize], signedData, buf[offSignature:offSignature+protocol.SignatureSize]) {
+		slog.Warn("auth: invalid signature", "remote", remote)
 		return protocol.ErrInvalidSignature
 	}
+	slog.Debug("auth: signature valid", "remote", remote)
 
 	// 12. Проверяем timestamp для защиты от replay attack
 	now := uint64(time.Now().Unix())
 	if timestamp > now+60 {
+		slog.Warn("auth: timestamp in future", "remote", remote, "diff_seconds", timestamp-now)
 		return fmt.Errorf("timestamp in future")
 	}
 	if now-timestamp > uint64(challengeTTL.Seconds()) {
+		slog.Warn("auth: challenge expired", "remote", remote, "age_seconds", now-timestamp)
 		return protocol.ErrChallengeExpired
 	}
+	slog.Debug("auth: timestamp valid", "remote", remote, "age_seconds", now-timestamp)
 
 	// 13. Отправляем успешный результат (синхронизация с клиентом)
 	// PubKey остаётся в buf[offPubKey:] - вызывающий код возьмёт его оттуда
@@ -138,6 +157,7 @@ func authenticate(conn net.Conn, timeout, challengeTTL time.Duration, buf []byte
 	if _, err := conn.Write(buf[offWork : offWork+2]); err != nil {
 		return fmt.Errorf("send auth result: %w", err)
 	}
+	slog.Debug("auth: auth result sent", "remote", remote)
 
 	return nil
 }

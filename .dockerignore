@@ -1,0 +1,40 @@
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+tests/
+*_test.go
+*.test
+coverage.*
+*.out
+
+# Certificates (will be mounted)
+certs/
+*.pem
+*.crt
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Misc
+.DS_Store
+Thumbs.db
+.env
+.env.*

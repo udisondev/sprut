@@ -61,6 +61,7 @@ type LimitsConfig struct {
 type LogConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+	File   string `yaml:"file"` // путь к файлу логов (пустой = stdout)
 }
 
 // Validate проверяет корректность конфигурации.

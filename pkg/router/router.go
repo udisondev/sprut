@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/udisondev/sprut/internal/broker"
-	"github.com/udisondev/sprut/internal/config"
+	"github.com/udisondev/sprut/pkg/broker"
+	"github.com/udisondev/sprut/pkg/config"
 	"github.com/udisondev/sprut/pkg/protocol"
 )
 
@@ -104,7 +104,15 @@ func Serve(ctx context.Context, cfg *config.Config, lis net.Listener) error {
 	// sync.Map для пиров
 	var peers sync.Map
 
-	slog.Info("router started", "addr", addr, "maxConns", cfg.Limits.MaxConnections)
+	slog.Info("router started", "addr", addr)
+	slog.Info("router: configuration",
+		"max_connections", cfg.Limits.MaxConnections,
+		"max_message_size", cfg.Limits.MaxMessageSize,
+		"rate_limit_per_sec", cfg.Limits.RateLimitPerSec,
+		"rate_limit_burst", cfg.Limits.RateLimitBurst,
+		"auth_timeout", cfg.Limits.AuthTimeout,
+		"challenge_ttl", cfg.Limits.ChallengeTTL,
+	)
 
 	// Сигнализируем что сервер готов
 	if cfg.Ready != nil {
@@ -128,14 +136,15 @@ func Serve(ctx context.Context, cfg *config.Config, lis net.Listener) error {
 
 		select {
 		case authBuf := <-authSem:
+			slog.Debug("router: auth buffer acquired", "remote", conn.RemoteAddr())
 			go func(c net.Conn, buf []byte) {
 				defer func() { authSem <- buf }()
 				handleConn(c, &peers, buf, msgPool, brk, cfg)
 			}(conn, authBuf)
 		default:
-			slog.Warn("connection limit reached", "remote", conn.RemoteAddr())
+			slog.Warn("router: connection limit reached", "remote", conn.RemoteAddr())
 			if err := conn.Close(); err != nil {
-				slog.Error("close connection on limit", "error", err)
+				slog.Error("router: close connection on limit failed", "error", err)
 			}
 		}
 	}
@@ -187,9 +196,10 @@ func handleConn(
 		cfg.Limits.RateLimitPerSec, cfg.Limits.RateLimitBurst,
 	)
 	if err != nil {
-		slog.Error("create peer", "error", err, "client", pubKeyHex)
+		slog.Error("router: create peer failed", "error", err, "client", pubKeyHex)
 		return
 	}
+	slog.Debug("router: peer created", "client", pubKeyHex, "remote", remoteAddr)
 
 	// 3. Закрываем старое соединение если есть (reconnect case)
 	if old, loaded := peers.LoadAndDelete(id); loaded {
@@ -206,6 +216,7 @@ func handleConn(
 	}()
 
 	// 4. Запускаем write loop
+	slog.Debug("router: starting read/write loops", "client", pubKeyHex)
 	go peer.writeLoop()
 
 	// 5. Read loop (блокирующий)

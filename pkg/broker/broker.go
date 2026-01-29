@@ -29,14 +29,14 @@ func New(cfg Config) (*Broker, error) {
 		nats.MaxReconnects(cfg.MaxReconnects),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			if err != nil {
-				slog.Warn("NATS disconnected", "error", err)
+				slog.Warn("broker: NATS disconnected", "error", err)
 			}
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			slog.Info("NATS reconnected", "url", nc.ConnectedUrl())
+			slog.Info("broker: NATS reconnected", "url", nc.ConnectedUrl())
 		}),
 		nats.ClosedHandler(func(_ *nats.Conn) {
-			slog.Info("NATS connection closed")
+			slog.Info("broker: NATS connection closed")
 		}),
 	}
 
@@ -46,10 +46,15 @@ func New(cfg Config) (*Broker, error) {
 		url = strings.Join(cfg.URLs, ",")
 	}
 
+	slog.Debug("broker: connecting", "urls", url)
+
 	conn, err := nats.Connect(url, opts...)
 	if err != nil {
+		slog.Error("broker: connect failed", "urls", url, "error", err)
 		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
+
+	slog.Debug("broker: connection established", "server_id", conn.ConnectedServerId(), "url", conn.ConnectedUrl())
 
 	return &Broker{conn: conn}, nil
 }
@@ -61,5 +66,10 @@ func (b *Broker) Conn() *nats.Conn {
 
 // Close закрывает соединение.
 func (b *Broker) Close() error {
-	return b.conn.Drain()
+	slog.Debug("broker: closing connection")
+	if err := b.conn.Drain(); err != nil {
+		slog.Error("broker: drain failed", "error", err)
+		return err
+	}
+	return nil
 }

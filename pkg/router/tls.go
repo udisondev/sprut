@@ -4,21 +4,31 @@ package router
 import (
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 
-	"github.com/udisondev/sprut/internal/config"
+	"github.com/udisondev/sprut/pkg/config"
 )
 
 // buildTLSConfig создаёт production-ready TLS конфигурацию.
 func buildTLSConfig(cfg config.TLSConfig) (*tls.Config, error) {
+	slog.Debug("tls: loading certificates", "cert_file", cfg.CertFile, "key_file", cfg.KeyFile)
+
 	cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 	if err != nil {
+		slog.Error("tls: load certificates failed", "error", err, "cert_file", cfg.CertFile, "key_file", cfg.KeyFile)
 		return nil, fmt.Errorf("load certificates: %w", err)
 	}
 
+	slog.Info("tls: certificates loaded", "cert_file", cfg.CertFile)
+
 	minVersion := tls.VersionTLS12
+	minVersionStr := "1.2"
 	if cfg.MinVersion == "1.3" {
 		minVersion = tls.VersionTLS13
+		minVersionStr = "1.3"
 	}
+
+	slog.Debug("tls: configuration built", "min_version", minVersionStr, "session_tickets_disabled", true)
 
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},

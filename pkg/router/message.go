@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -60,13 +61,17 @@ func handleMessage(peer *Peer, pool *sync.Pool, maxMessageSize int) error {
 
 	totalLen := binary.BigEndian.Uint32(buf[:4])
 	if totalLen > uint32(maxMessageSize) {
+		slog.Warn("message: too large", "client", peer.pubKeyHex, "size", totalLen, "max", maxMessageSize)
 		return fmt.Errorf("message too large: %d bytes", totalLen)
 	}
 
 	// Проверка минимальной длины для предотвращения buffer underflow
 	if totalLen < minMessageSize {
+		slog.Warn("message: too small", "client", peer.pubKeyHex, "size", totalLen, "min", minMessageSize)
 		return fmt.Errorf("message too small: %d bytes, minimum %d", totalLen, minMessageSize)
 	}
+
+	slog.Debug("message: received", "client", peer.pubKeyHex, "size", totalLen)
 
 	// 2. Читаем остаток сообщения
 	// totalLen = To(64) + MsgIDLen(2) + MsgID + Payload
@@ -84,11 +89,13 @@ func handleMessage(peer *Peer, pool *sync.Pool, maxMessageSize int) error {
 
 	// Валидация hex для предотвращения NATS subject injection
 	if !isValidHexPubKey(to) {
+		slog.Warn("message: invalid recipient", "client", peer.pubKeyHex, "to_raw", to)
 		return errInvalidRecipient
 	}
 
 	msgIDLen := binary.BigEndian.Uint16(buf[protocol.PublicKeySize*2 : protocol.PublicKeySize*2+2])
 	if int(msgIDLen) > protocol.MaxMsgIDLen {
+		slog.Warn("message: msgID too long", "client", peer.pubKeyHex, "len", msgIDLen, "max", protocol.MaxMsgIDLen)
 		return fmt.Errorf("msgID too long: %d", msgIDLen)
 	}
 
@@ -102,6 +109,8 @@ func handleMessage(peer *Peer, pool *sync.Pool, maxMessageSize int) error {
 
 	msgID := string(buf[msgIDStart:msgIDEnd])
 	payload := buf[msgIDEnd:totalLen]
+
+	slog.Debug("message: parsed", "client", peer.pubKeyHex, "to", to, "msg_id", msgID, "payload_size", len(payload))
 
 	// 5. Получаем Message из пула (zero-allocation hot path)
 	msg := messagePool.Get().(*message.Message)
@@ -119,13 +128,17 @@ func handleMessage(peer *Peer, pool *sync.Pool, maxMessageSize int) error {
 	// 6. Сериализуем
 	data, err := proto.Marshal(msg)
 	if err != nil {
+		slog.Error("message: marshal failed", "client", peer.pubKeyHex, "error", err)
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
 	// 7. Публикуем в NATS
 	if err := peer.publisher.Publish(to, data); err != nil {
+		slog.Error("message: publish failed", "client", peer.pubKeyHex, "to", to, "error", err)
 		return fmt.Errorf("publish to NATS: %w", err)
 	}
+
+	slog.Debug("message: published", "client", peer.pubKeyHex, "to", to, "subject", "goro.msg."+to)
 
 	return nil
 }

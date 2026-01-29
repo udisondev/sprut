@@ -1,4 +1,4 @@
-.PHONY: all build proto clean test lint deps
+.PHONY: all build proto clean test test-unit test-e2e lint deps init run examples help
 
 GO := go
 PROTOC := protoc
@@ -6,8 +6,8 @@ PROTOC := protoc
 # Output directories
 BIN_DIR := bin
 
-# Binary names
-SERVER_BIN := gorod
+# Binary name
+SERVER_BIN := sprut
 
 all: deps proto build
 
@@ -25,21 +25,28 @@ clean:
 	rm -rf $(BIN_DIR)
 	rm -f pkg/message/message.pb.go
 
+# Run all tests
 test:
 	$(GO) test -v -race ./...
+
+# Run only unit tests (fast, no containers)
+test-unit:
+	$(GO) test -v -race -short ./...
+
+# Run only e2e tests (requires Docker)
+test-e2e:
+	$(GO) test -v -race ./tests/e2e/... ./pkg/testsprut/...
 
 lint:
 	golangci-lint run
 
-# Generate TLS certificates for testing
-certs:
-	mkdir -p certs
-	openssl req -x509 -newkey rsa:4096 -keyout certs/server.key -out certs/server.crt \
-		-days 365 -nodes -subj "/CN=localhost"
+# Initialize app directory (XDG config dir)
+init: build
+	$(BIN_DIR)/$(SERVER_BIN) --init
 
-# Run server with test config
+# Run server (uses XDG config dir)
 run: build
-	$(BIN_DIR)/$(SERVER_BIN) -config config.yaml
+	$(BIN_DIR)/$(SERVER_BIN)
 
 # Build examples
 examples:
@@ -48,13 +55,15 @@ examples:
 
 help:
 	@echo "Available targets:"
-	@echo "  all       - Download deps, generate proto, build server"
-	@echo "  deps      - Download dependencies"
-	@echo "  proto     - Generate protobuf code"
-	@echo "  build     - Build server binary"
-	@echo "  clean     - Remove build artifacts"
-	@echo "  test      - Run tests"
-	@echo "  lint      - Run linter"
-	@echo "  certs     - Generate test TLS certificates"
-	@echo "  run       - Build and run server"
-	@echo "  examples  - Build example clients"
+	@echo "  all        - Download deps, generate proto, build server"
+	@echo "  deps       - Download dependencies"
+	@echo "  proto      - Generate protobuf code"
+	@echo "  build      - Build server binary"
+	@echo "  clean      - Remove build artifacts"
+	@echo "  test       - Run all tests (requires Docker)"
+	@echo "  test-unit  - Run unit tests only (fast, no Docker)"
+	@echo "  test-e2e   - Run e2e tests only (requires Docker)"
+	@echo "  lint       - Run linter"
+	@echo "  init       - Initialize app directory (~/.config/sprut)"
+	@echo "  run        - Build and run server"
+	@echo "  examples   - Build example clients"
